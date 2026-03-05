@@ -725,8 +725,12 @@ async function loadProfilerSettings() {
 }
 
 async function saveProfilerSettings() {
-  const sensor_ids = document.getElementById('pSensorIds').value
-    .split('\n').map(s => s.trim()).filter(Boolean);
+  // Aceita um ID por linha OU separados por vírgula
+  const raw = document.getElementById('pSensorIds').value;
+  const sensor_ids = raw
+    .split(/[\n,]+/)
+    .map(s => s.trim())
+    .filter(Boolean);
   const body = {
     base_url: document.getElementById('pBaseUrl').value.trim(),
     user_id: document.getElementById('pUserId').value.trim(),
