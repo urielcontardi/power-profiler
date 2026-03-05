@@ -343,7 +343,6 @@ function switchTab(name) {
     refreshConfigs();
     loadSequence();
     refreshEventFiles();
-    pollProfilerStatus();
     if (!profilerPollInterval) startProfilerPoll();
   }
 }
@@ -884,6 +883,9 @@ async function saveSequence() {
 
 // Run control
 async function startProfilerRun() {
+  const btnStart = document.getElementById('btnProfilerStart');
+  const btnStop = document.getElementById('btnProfilerStop');
+  btnStart.disabled = true;
   try {
     const r = await fetch('/api/profiler/run/start', { method: 'POST' });
     const d = await r.json();
@@ -892,21 +894,29 @@ async function startProfilerRun() {
         await pollProfilerStatus();
         alert('Teste já está em andamento. A interface foi atualizada.');
       } else {
+        btnStart.disabled = false;
         alert('Erro: ' + d.error);
       }
       return;
     }
-    document.getElementById('btnProfilerStart').disabled = true;
-    document.getElementById('btnProfilerStop').disabled = false;
+    btnStop.disabled = false;
     startProfilerPoll();
-  } catch (e) { alert('Erro: ' + e.message); }
+  } catch (e) {
+    btnStart.disabled = false;
+    alert('Erro: ' + e.message);
+  }
 }
 
 async function stopProfilerRun() {
+  const btnStop = document.getElementById('btnProfilerStop');
+  btnStop.disabled = true;
   try {
     await fetch('/api/profiler/run/stop', { method: 'POST' });
     await pollProfilerStatus();
-  } catch (e) { console.error(e); }
+  } catch (e) {
+    btnStop.disabled = false;
+    console.error(e);
+  }
 }
 
 function startProfilerPoll() {
@@ -944,8 +954,9 @@ function updateProfilerUI(d) {
     }
     btnStart.disabled = false;
     btnStop.disabled = true;
-    if (profilerPollInterval && !d.running) {
-      // keep polling for a bit after stop to show final state
+    if (profilerPollInterval) {
+      clearInterval(profilerPollInterval);
+      profilerPollInterval = null;
     }
   }
 
