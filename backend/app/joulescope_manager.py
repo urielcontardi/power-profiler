@@ -488,6 +488,14 @@ class JoulescopeManager:
     def start_capture(self, window_duration: float = 10.0, output_file: str = 'joulescope_log.csv',
                      sampling_rate: Optional[float] = None, max_windows: int = 0,
                      rotate_interval_minutes: float = ROTATE_INTERVAL_MINUTES) -> dict:
+        # Sempre incluir data (YYYYMMDD) no nome do CSV
+        base = Path(output_file).stem
+        suffix = Path(output_file).suffix or ".csv"
+        if suffix.lower() != ".csv":
+            suffix = ".csv"
+        date_str = datetime.now(TZ_SAO_PAULO).strftime("%Y%m%d")
+        output_file = f"{base}_{date_str}{suffix}"
+
         with self._lock:
             if self._status['running']:
                 self._push_event("warning", "Captura já em andamento. Start ignorado")
