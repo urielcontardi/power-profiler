@@ -502,5 +502,16 @@ async def profiler_list_events():
 # --- Static frontend (must be last) ---
 
 static_dir = Path(__file__).parent / "static"
+
+
+@app.get("/")
+async def serve_index():
+    """Serve the SPA at root so GET / always returns the frontend (avoids 404 on deploy)."""
+    index = static_dir / "index.html"
+    if index.exists():
+        return FileResponse(index, media_type="text/html")
+    return JSONResponse(status_code=404, content={"error": "Frontend index.html not found"})
+
+
 if static_dir.exists():
     app.mount("/", StaticFiles(directory=str(static_dir), html=True), name="static")

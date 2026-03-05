@@ -67,9 +67,12 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8080
 
 Para rodar sem manter terminal aberto, configure o app como serviço `systemd`.
 
-1. Criar o serviço:
+1. Criar o serviço (na Radxa, com o repo em `~/power-profiler` e usuário `serial`):
 
 ```bash
+# Opção A: copiar o arquivo do repositório (ajuste User/Paths se seu usuário ou pasta for outro)
+sudo cp ~/power-profiler/scripts/joulescope-logger.service /etc/systemd/system/
+# Opção B: criar manualmente (troque 'serial' e 'power-profiler' se necessário)
 sudo tee /etc/systemd/system/joulescope-logger.service > /dev/null <<'EOF'
 [Unit]
 Description=Joulescope Logger (uvicorn)
@@ -77,9 +80,9 @@ After=network.target
 
 [Service]
 User=serial
-WorkingDirectory=/home/serial/joulescope-logger/backend
-Environment=LOG_DIR=/home/serial/joulescope-logger/logs
-ExecStart=/home/serial/joulescope-logger/backend/.venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8081
+WorkingDirectory=/home/serial/power-profiler/backend
+Environment=LOG_DIR=/home/serial/power-profiler/logs
+ExecStart=/home/serial/power-profiler/backend/.venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8081
 Restart=always
 RestartSec=3
 
