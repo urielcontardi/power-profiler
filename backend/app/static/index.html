@@ -336,11 +336,15 @@ function switchTab(name) {
   document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
   document.getElementById('tab-' + name).classList.add('active');
   event.currentTarget.classList.add('active');
-  if (name === 'profiler') {
+  if (name === 'logger') {
+    updateCaptureStatus();
+  } else if (name === 'profiler') {
     loadProfilerSettings();
     refreshConfigs();
     loadSequence();
     refreshEventFiles();
+    pollProfilerStatus();
+    if (!profilerPollInterval) startProfilerPoll();
   }
 }
 
@@ -451,13 +455,22 @@ async function startCapture() {
       body: JSON.stringify(body),
     });
     const d = await r.json();
-    if (d.error) { alert('Erro: ' + d.error); return; }
+    if (d.error) {
+      if (d.error.toLowerCase().includes('already running')) {
+        await updateCaptureStatus();
+        alert('Captura já está em andamento. A interface foi atualizada.');
+      } else {
+        alert('Erro: ' + d.error);
+      }
+      return;
+    }
     await updateCaptureStatus();
     connectWs();
+    const actualFile = d.output_file || body.output_file;
     setTimeout(() => {
       refreshExperiments();
-      selectAndLoad(body.output_file);
-      startLiveUpdates(body.output_file);
+      selectAndLoad(actualFile);
+      startLiveUpdates(actualFile);
     }, 2000);
   } catch (e) { alert('Erro: ' + e.message); }
 }
@@ -468,10 +481,13 @@ async function stopCapture() {
     disconnectWs();
     stopLiveUpdates();
     await updateCaptureStatus();
-    $btnStart.disabled = false;
+    $btnStart.disabled = !deviceAvailable;
     $btnStop.disabled = true;
     refreshExperiments();
-  } catch (e) { alert('Erro: ' + e.message); }
+  } catch (e) {
+    await updateCaptureStatus();
+    alert('Erro: ' + e.message);
+  }
 }
 
 function connectWs() {
@@ -871,7 +887,15 @@ async function startProfilerRun() {
   try {
     const r = await fetch('/api/profiler/run/start', { method: 'POST' });
     const d = await r.json();
-    if (d.error) { alert('Erro: ' + d.error); return; }
+    if (d.error) {
+      if (d.error.toLowerCase().includes('already running')) {
+        await pollProfilerStatus();
+        alert('Teste já está em andamento. A interface foi atualizada.');
+      } else {
+        alert('Erro: ' + d.error);
+      }
+      return;
+    }
     document.getElementById('btnProfilerStart').disabled = true;
     document.getElementById('btnProfilerStop').disabled = false;
     startProfilerPoll();
@@ -881,6 +905,7 @@ async function startProfilerRun() {
 async function stopProfilerRun() {
   try {
     await fetch('/api/profiler/run/stop', { method: 'POST' });
+    await pollProfilerStatus();
   } catch (e) { console.error(e); }
 }
 
