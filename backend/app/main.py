@@ -4,16 +4,18 @@ Single-page frontend with capture controls and visualization.
 """
 
 import asyncio
+import io
 import logging
 import math
 import os
+import zipfile
 from pathlib import Path
 
 import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from fastapi import FastAPI, File, UploadFile
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi import WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
@@ -170,8 +172,8 @@ async def list_experiments():
         return {"files": []}
     files = []
     for f in sorted(log_path.glob("*.csv"), key=lambda x: x.stat().st_mtime, reverse=True):
-        if "event_" not in f.name:
-            files.append({"name": f.name, "path": f.name})
+        if not f.name.startswith("events_"):
+            files.append({"name": f.name, "path": f.name, "size": f.stat().st_size})
     return {"files": files}
 
 
@@ -416,6 +418,25 @@ async def websocket_capture(websocket: WebSocket):
         pass
     finally:
         manager.unsubscribe(on_window)
+
+
+@app.post("/api/download-zip")
+async def download_zip(body: dict):
+    """Download multiple experiment CSV files as a single ZIP archive."""
+    filenames = body.get("files", [])
+    safe_names = [Path(f).name for f in filenames if Path(f).name.endswith(".csv")]
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for name in safe_names:
+            path = Path(LOG_DIR) / name
+            if path.exists() and path.is_file():
+                zf.write(path, name)
+    buf.seek(0)
+    return StreamingResponse(
+        buf,
+        media_type="application/zip",
+        headers={"Content-Disposition": 'attachment; filename="experiments.zip"'},
+    )
 
 
 # --- Profiler API ---

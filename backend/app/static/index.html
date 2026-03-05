@@ -98,6 +98,7 @@ table.data-table td input:focus{outline:none;border-color:var(--accent)}
 .sensor-error{color:var(--red)}
 .toggle-arrow{color:var(--text-dim);transition:.2s;display:inline-block}
 .toggle-arrow.collapsed{transform:rotate(-90deg)}
+.exp-active td{background:rgba(88,166,255,0.08)}
 </style>
 </head>
 <body>
@@ -161,13 +162,22 @@ table.data-table td input:focus{outline:none;border-color:var(--accent)}
   <!-- Experiments -->
   <div class="section">
     <h2>&#128196; Experimentos</h2>
-    <div class="select-row">
-      <select id="experimentSelect" class="form-input" onchange="loadExperiment()">
-        <option value="">-- Selecione um arquivo --</option>
-      </select>
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px">
       <button class="btn" onclick="refreshExperiments()">Atualizar</button>
-      <button class="btn" onclick="downloadCsv()" id="btnDownload" title="Baixar CSV" disabled>&#8681; Baixar CSV</button>
-      <button class="btn btn-stop" onclick="deleteCsv()" id="btnDelete" title="Deletar CSV" disabled>&#128465; Deletar CSV</button>
+      <button class="btn" id="btnDownloadSelected" onclick="downloadSelectedCsvs()" disabled title="Baixar selecionados como ZIP">&#8681; Baixar ZIP</button>
+      <button class="btn btn-stop" id="btnDeleteSelected" onclick="deleteSelectedCsvs()" disabled title="Deletar selecionados">&#128465; Deletar</button>
+      <label style="font-size:12px;color:var(--text-dim);display:flex;align-items:center;gap:4px;cursor:pointer;margin-left:4px">
+        <input type="checkbox" id="chkSelectAll" onchange="toggleSelectAll(this.checked)"> Todos
+      </label>
+      <span id="selectedCount" style="font-size:12px;color:var(--accent)"></span>
+    </div>
+    <div style="max-height:180px;overflow-y:auto;border:1px solid var(--border);border-radius:6px">
+      <table class="data-table" style="margin:0">
+        <thead><tr><th style="width:32px"></th><th>Arquivo</th><th>Tamanho</th></tr></thead>
+        <tbody id="experimentsBody">
+          <tr><td colspan="3" style="color:var(--text-dim)">Nenhum arquivo CSV</td></tr>
+        </tbody>
+      </table>
     </div>
     <div id="experimentStats" class="stats" style="display:none"></div>
   </div>
@@ -369,8 +379,9 @@ const $captureStatus = document.getElementById('capture-status');
 const $captureInfo = document.getElementById('captureInfo');
 const $btnStart = document.getElementById('btn-start') || document.getElementById('btnStart');
 const $btnStop = document.getElementById('btn-stop') || document.getElementById('btnStop');
-const $expSelect = document.getElementById('experimentSelect');
 const $expStats = document.getElementById('experimentStats');
+let experimentsData = [];
+let selectedFiles = new Set();
 const $liveIndicator = document.getElementById('liveIndicator');
 
 let deviceAvailable = false;
@@ -512,46 +523,80 @@ async function refreshExperiments() {
   try {
     const r = await fetch('/api/experiments');
     const d = await r.json();
-    const files = d.files || [];
-    const sel = $expSelect;
-    const cur = sel.value;
-    sel.innerHTML = '<option value="">-- Selecione um arquivo --</option>';
-    files.forEach(f => {
-      const opt = document.createElement('option');
-      opt.value = f.path;
-      opt.textContent = f.name;
-      sel.appendChild(opt);
-    });
-    if (cur) sel.value = cur;
+    experimentsData = d.files || [];
+    renderExperimentsTable();
   } catch {}
+}
+
+function renderExperimentsTable() {
+  const tbody = document.getElementById('experimentsBody');
+  if (!experimentsData.length) {
+    tbody.innerHTML = '<tr><td colspan="3" style="color:var(--text-dim)">Nenhum arquivo CSV</td></tr>';
+    document.getElementById('chkSelectAll').checked = false;
+    updateSelectionUI();
+    return;
+  }
+  const rows = experimentsData.map(function(f) {
+    const chk = selectedFiles.has(f.name) ? ' checked' : '';
+    const sz = f.size != null ? (f.size/1024).toFixed(1)+' KB' : '--';
+    const esc = escapeHtml(f.name);
+    const escPath = escapeHtml(f.path);
+    return '<tr data-name="'+esc+'" style="cursor:pointer" onclick="loadExperimentRow(\''+esc+'\',\''+escPath+'\')">'
+      +'<td onclick="event.stopPropagation()" style="padding:6px 10px"><input type="checkbox" onchange="toggleFileSelect(\''+esc+'\',this.checked)"'+chk+'></td>'
+      +'<td style="font-size:12px;font-family:monospace">'+esc+'</td>'
+      +'<td style="color:var(--text-dim);font-size:12px">'+sz+'</td>'
+      +'</tr>';
+  });
+  tbody.innerHTML = rows.join('');
+  if (currentExperiment) {
+    document.querySelectorAll('#experimentsBody tr').forEach(function(row) {
+      if (row.dataset.name === currentExperiment) row.classList.add('exp-active');
+    });
+  }
+  updateSelectionUI();
+}
+
+function loadExperimentRow(name, path) {
+  document.querySelectorAll('#experimentsBody tr').forEach(function(r) { r.classList.remove('exp-active'); });
+  document.querySelectorAll('#experimentsBody tr').forEach(function(r) {
+    if (r.dataset.name === name) r.classList.add('exp-active');
+  });
+  loadExperiment(path);
+}
+
+function toggleFileSelect(name, checked) {
+  if (checked) selectedFiles.add(name);
+  else selectedFiles.delete(name);
+  updateSelectionUI();
+}
+
+function toggleSelectAll(checked) {
+  selectedFiles.clear();
+  if (checked) experimentsData.forEach(function(f) { selectedFiles.add(f.name); });
+  document.querySelectorAll('#experimentsBody input[type=checkbox]').forEach(function(cb) { cb.checked = checked; });
+  updateSelectionUI();
+}
+
+function updateSelectionUI() {
+  const count = selectedFiles.size;
+  document.getElementById('btnDownloadSelected').disabled = count === 0;
+  document.getElementById('btnDeleteSelected').disabled = count === 0;
+  document.getElementById('selectedCount').textContent = count > 0 ? count + ' selecionado(s)' : '';
 }
 
 function selectAndLoad(filepath) {
   const name = filepath.split('/').pop() || filepath;
-  const opts = $expSelect.options;
-  for (let i = 0; i < opts.length; i++) {
-    if (opts[i].value && opts[i].value.endsWith(name)) {
-      $expSelect.value = opts[i].value;
-      loadExperiment();
-      return;
-    }
-  }
+  const file = experimentsData.find(function(f) { return f.name === name || (f.path && f.path.endsWith(name)); });
+  if (file) loadExperimentRow(file.name, file.path);
 }
 
-async function loadExperiment() {
-  const path = $expSelect.value;
-  const btnDownload = document.getElementById('btnDownload');
-  const btnDelete = document.getElementById('btnDelete');
+async function loadExperiment(path) {
   if (!path) {
     $expStats.style.display = 'none';
     document.getElementById('timeSeriesPlot').innerHTML = '';
     document.getElementById('energyPlot').innerHTML = '';
-    if (btnDownload) btnDownload.disabled = true;
-    if (btnDelete) btnDelete.disabled = true;
     return;
   }
-  if (btnDownload) btnDownload.disabled = false;
-  if (btnDelete) btnDelete.disabled = false;
   currentExperiment = path.split('/').pop();
   try {
     const r = await fetch('/api/experiment/' + encodeURIComponent(path));
@@ -594,7 +639,7 @@ let lastWindowCount = 0;
 function startLiveUpdates(filepath) {
   stopLiveUpdates();
   liveUpdateInterval = setInterval(async () => {
-    const path = $expSelect.value || filepath;
+    const path = currentExperiment || filepath;
     if (!path) return;
     try {
       const r = await fetch('/api/experiment/' + encodeURIComponent(path));
@@ -651,11 +696,28 @@ function startLogUpdates() {
   logUpdateInterval = setInterval(refreshLogs, 2000);
 }
 
-function downloadCsv() {
-  const path = $expSelect.value;
-  if (!path) return;
-  const filename = path.split('/').pop() || path;
-  window.location.href = '/api/download/' + encodeURIComponent(filename);
+async function downloadSelectedCsvs() {
+  if (selectedFiles.size === 0) return;
+  if (selectedFiles.size === 1) {
+    const name = Array.from(selectedFiles)[0];
+    window.location.href = '/api/download/' + encodeURIComponent(name);
+    return;
+  }
+  try {
+    const r = await fetch('/api/download-zip', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({files: Array.from(selectedFiles)}),
+    });
+    if (!r.ok) { alert('Erro ao gerar ZIP'); return; }
+    const blob = await r.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'experiments.zip';
+    a.click();
+    URL.revokeObjectURL(url);
+  } catch (e) { alert('Erro: ' + e.message); }
 }
 
 async function runDiagnostics() {
@@ -701,24 +763,27 @@ function escapeHtml(s) {
   return div.innerHTML;
 }
 
-async function deleteCsv() {
-  const path = $expSelect.value;
-  if (!path) return;
-  const filename = path.split('/').pop() || path;
-  if (!window.confirm(`Deseja deletar o arquivo ${filename}?`)) return;
-  try {
-    const r = await fetch('/api/experiment/' + encodeURIComponent(filename), { method: 'DELETE' });
-    const d = await r.json();
-    if (!r.ok || d.error) { alert('Erro ao deletar: ' + (d.error || r.statusText)); return; }
+async function deleteSelectedCsvs() {
+  if (selectedFiles.size === 0) return;
+  const names = Array.from(selectedFiles);
+  if (!window.confirm('Deseja deletar ' + names.length + ' arquivo(s)?')) return;
+  let deletedCurrent = false;
+  for (const name of names) {
+    try {
+      const r = await fetch('/api/experiment/' + encodeURIComponent(name), { method: 'DELETE' });
+      const d = await r.json();
+      if (!r.ok || d.error) { alert('Erro ao deletar ' + name + ': ' + (d.error || r.statusText)); continue; }
+      selectedFiles.delete(name);
+      if (name === currentExperiment) deletedCurrent = true;
+    } catch (e) { alert('Erro ao deletar ' + name + ': ' + e.message); }
+  }
+  if (deletedCurrent) {
     currentExperiment = null;
-    $expSelect.value = '';
     $expStats.style.display = 'none';
     document.getElementById('timeSeriesPlot').innerHTML = '';
     document.getElementById('energyPlot').innerHTML = '';
-    document.getElementById('btnDownload').disabled = true;
-    document.getElementById('btnDelete').disabled = true;
-    await refreshExperiments();
-  } catch (e) { alert('Erro ao deletar: ' + e.message); }
+  }
+  await refreshExperiments();
 }
 
 // ================================================================
