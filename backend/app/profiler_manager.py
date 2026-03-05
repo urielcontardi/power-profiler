@@ -348,33 +348,62 @@ class ProfilerManager:
 
     def _check_firmware(self, client: IoTClient, sensor_ids: list[str],
                          writer, f, retry_interval: int) -> bool:
+        # confirmed = sensors verified with correct firmware (never regress display for these)
+        confirmed: set[str] = set()
         attempt = 0
         while not self._stop_event.is_set():
             attempt += 1
-            self._log(f"Checking firmware (attempt {attempt})...")
-            all_ok = True
+            pending = [s for s in sensor_ids if s not in confirmed]
+            self._log(
+                f"Checking firmware (attempt {attempt}) — "
+                f"{len(confirmed)}/{len(sensor_ids)} OK, pending: {pending}"
+            )
+
+            # Always poll ALL sensors for maximum verification
             for sid in sensor_ids:
-                status = client.get_last_status(sid)
-                if status is None:
-                    self._update_sensor(sid, "No response")
-                    all_ok = False
+                if self._stop_event.is_set():
+                    return False
+                try:
+                    status = client.get_last_status(sid)
+                except Exception as e:
+                    self._log(f"  ERROR {sid}: get_last_status failed: {e}")
+                    if sid not in confirmed:
+                        self._update_sensor(sid, f"API error: {e}")
                     continue
+
+                if status is None:
+                    self._log(f"  WARN {sid}: no status returned")
+                    if sid not in confirmed:
+                        self._update_sensor(sid, "No response")
+                    continue
+
                 fw = status.get("firmwareVersion") or ""
                 if fw.startswith(EXPECTED_FW_PREFIX):
-                    self._update_sensor(sid, f"FW OK: {fw}")
+                    if sid not in confirmed:
+                        self._update_sensor(sid, f"FW OK: {fw}")
+                        confirmed.add(sid)
+                        self._log(f"  OK {sid}: FW {fw}")
+                    # Already confirmed — just log if something unexpected shows up
                 else:
-                    self._update_sensor(sid, f"FW Wrong: {fw or 'unknown'}")
-                    all_ok = False
+                    if sid not in confirmed:
+                        self._update_sensor(sid, f"FW Wrong: {fw or 'unknown'}")
+                    else:
+                        self._log(f"  WARN {sid}: previously confirmed FW, now reports '{fw}'")
+                    self._log(f"  WAIT {sid}: FW '{fw}' (expected prefix {EXPECTED_FW_PREFIX})")
 
-            if all_ok:
+            if len(confirmed) == len(sensor_ids):
                 self._write_event(writer, f, "firmware_ok", details=f"attempt={attempt}")
                 self._log(f"All {len(sensor_ids)} sensors on firmware {EXPECTED_FW_PREFIX}*")
                 return True
 
-            self._log(f"Waiting {retry_interval} min before retry...")
+            still_pending = [s for s in sensor_ids if s not in confirmed]
+            self._log(f"  Still pending firmware: {still_pending}. Waiting {retry_interval} min...")
             self._interruptible_sleep(retry_interval * 60)
 
         return False
+
+    # Maximum retries per sensor when sending config
+    _SEND_MAX_RETRIES = 3
 
     def _send_config(self, client: IoTClient, sensor_ids: list[str],
                      config_file: str, purpose: str, writer, f) -> dict | None:
@@ -392,45 +421,65 @@ class ProfilerManager:
         for sid in sensor_ids:
             if self._stop_event.is_set():
                 return None
+
             self._update_sensor(sid, f"Sending {config_file}...")
-            try:
-                current = client.get_config(sid)
-                cur_cfg = current.get("config") or current
-            except Exception as e:
-                self._log(f"  ERROR {sid}: Failed to read current config: {e}")
-                self._update_sensor(sid, "Error reading config")
-                return None
+            sent = False
 
-            body = json.loads(json.dumps(template))
-            cfg = body.get("config") or body
-            cfg["deviceId"] = sid
-            cfg["macAddress"] = cur_cfg.get("macAddress", "")
-            cfg["idData"] = cur_cfg.get("idData", "")
+            for attempt in range(1, self._SEND_MAX_RETRIES + 1):
+                if self._stop_event.is_set():
+                    return None
+                try:
+                    current = client.get_config(sid)
+                    cur_cfg = current.get("config") or current
+                except Exception as e:
+                    self._log(f"  ERROR {sid} (attempt {attempt}/{self._SEND_MAX_RETRIES}): read config: {e}")
+                    self._update_sensor(sid, f"Read error (attempt {attempt}): {e}")
+                    if attempt < self._SEND_MAX_RETRIES:
+                        time.sleep(5)
+                    continue
 
-            try:
-                client.post_config(sid, body)
-                self._log(f"  OK {sid}: config sent")
-            except requests.HTTPError as e:
-                self._log(f"  ERROR {sid}: HTTP {e.response.status_code}")
-                self._update_sensor(sid, f"Send error: {e.response.status_code}")
-                return None
-            except Exception as e:
-                self._log(f"  ERROR {sid}: {e}")
-                self._update_sensor(sid, f"Send error: {e}")
-                return None
+                body = json.loads(json.dumps(template))
+                cfg = body.get("config") or body
+                cfg["deviceId"] = sid
+                cfg["macAddress"] = cur_cfg.get("macAddress", "")
+                cfg["idData"] = cur_cfg.get("idData", "")
 
-            try:
-                readback = client.get_config(sid)
-                rb_cfg = readback.get("config") or readback
-                rev = rb_cfg.get("configRevision")
-                revisions[sid] = rev
-                self._update_sensor(sid, f"Sent (rev {rev})")
-                self._write_event(writer, f, "config_sent", config_file, purpose, sid,
-                                  details=f"rev={rev}")
-                self._log(f"    {sid}: configRevision={rev}")
-            except Exception as e:
-                self._log(f"  ERROR {sid}: Failed to read back config: {e}")
-                self._update_sensor(sid, "Error reading revision")
+                try:
+                    client.post_config(sid, body)
+                    self._log(f"  OK {sid}: config posted (attempt {attempt})")
+                except requests.HTTPError as e:
+                    self._log(f"  ERROR {sid} (attempt {attempt}): HTTP {e.response.status_code}")
+                    self._update_sensor(sid, f"Send error {e.response.status_code} (attempt {attempt})")
+                    if attempt < self._SEND_MAX_RETRIES:
+                        time.sleep(5)
+                    continue
+                except Exception as e:
+                    self._log(f"  ERROR {sid} (attempt {attempt}): post config: {e}")
+                    self._update_sensor(sid, f"Send error (attempt {attempt}): {e}")
+                    if attempt < self._SEND_MAX_RETRIES:
+                        time.sleep(5)
+                    continue
+
+                try:
+                    readback = client.get_config(sid)
+                    rb_cfg = readback.get("config") or readback
+                    rev = rb_cfg.get("configRevision")
+                    revisions[sid] = rev
+                    self._update_sensor(sid, f"Sent (rev {rev})")
+                    self._write_event(writer, f, "config_sent", config_file, purpose, sid,
+                                      details=f"rev={rev}")
+                    self._log(f"    {sid}: configRevision={rev}")
+                    sent = True
+                    break
+                except Exception as e:
+                    self._log(f"  ERROR {sid} (attempt {attempt}): readback config: {e}")
+                    self._update_sensor(sid, f"Readback error (attempt {attempt}): {e}")
+                    if attempt < self._SEND_MAX_RETRIES:
+                        time.sleep(5)
+
+            if not sent:
+                self._log(f"  FATAL {sid}: failed after {self._SEND_MAX_RETRIES} attempts — aborting")
+                self._update_sensor(sid, f"Failed after {self._SEND_MAX_RETRIES} attempts")
                 return None
 
         return revisions
@@ -438,36 +487,86 @@ class ProfilerManager:
     def _wait_config_applied(self, client: IoTClient, sensor_ids: list[str],
                               revisions: dict[str, int], config_file: str, purpose: str,
                               writer, f, retry_interval: int) -> bool:
+        # confirmed = sensors that have been verified at the expected revision
+        # Once confirmed, display never regresses and event is never duplicated.
+        # We still poll ALL sensors every attempt for full verification.
+        confirmed: set[str] = set()
+        # Pre-confirm sensors with no expected revision (shouldn't happen, but be safe)
+        for sid in sensor_ids:
+            if revisions.get(sid) is None:
+                self._log(f"  WARN {sid}: no revision tracked — skipping wait for this sensor")
+                confirmed.add(sid)
+
         attempt = 0
         while not self._stop_event.is_set():
             attempt += 1
-            self._log(f"Checking config applied (attempt {attempt})...")
-            all_ok = True
+            pending = [s for s in sensor_ids if s not in confirmed]
+            self._log(
+                f"Checking config applied (attempt {attempt}) — "
+                f"{len(confirmed)}/{len(sensor_ids)} applied, pending: {pending}"
+            )
+
+            # Always poll ALL sensors
             for sid in sensor_ids:
+                if self._stop_event.is_set():
+                    return False
+
                 expected = revisions.get(sid)
                 if expected is None:
-                    continue
-                status = client.get_last_status(sid)
-                if status is None:
-                    self._update_sensor(sid, "No response (wait)")
-                    all_ok = False
-                    continue
-                actual = status.get("configRevision")
-                if actual == expected:
-                    self._update_sensor(sid, f"Applied (rev {actual})")
-                    self._write_event(writer, f, "config_applied", config_file, purpose, sid,
-                                      details=f"configRevision={actual}")
-                else:
-                    self._update_sensor(sid, f"Waiting rev {expected} (got {actual})")
-                    all_ok = False
+                    continue  # already pre-confirmed above
 
-            if all_ok:
+                try:
+                    status = client.get_last_status(sid)
+                except Exception as e:
+                    self._log(f"  ERROR {sid}: get_last_status failed: {e}")
+                    if sid not in confirmed:
+                        self._update_sensor(sid, f"API error: {e}")
+                    continue
+
+                if status is None:
+                    self._log(f"  WARN {sid}: no status returned")
+                    if sid not in confirmed:
+                        self._update_sensor(sid, "No response (wait)")
+                    continue
+
+                actual = status.get("configRevision")
+                # Normalize to int for comparison (API may return string or int)
+                try:
+                    actual_cmp = int(actual)
+                    expected_cmp = int(expected)
+                except (TypeError, ValueError):
+                    actual_cmp = actual
+                    expected_cmp = expected
+
+                if actual_cmp == expected_cmp:
+                    if sid not in confirmed:
+                        self._update_sensor(sid, f"Applied (rev {actual})")
+                        self._write_event(writer, f, "config_applied", config_file, purpose, sid,
+                                          details=f"configRevision={actual}")
+                        confirmed.add(sid)
+                        self._log(f"  OK {sid}: config applied (rev {actual})")
+                    else:
+                        self._log(f"  RE-CONFIRMED {sid}: rev {actual} (already applied)")
+                else:
+                    if sid not in confirmed:
+                        self._update_sensor(sid, f"Waiting rev {expected} (got {actual})")
+                        self._log(f"  WAIT {sid}: expected rev {expected}, got {actual}")
+                    else:
+                        # Sensor was confirmed but now reports a different rev — log anomaly,
+                        # do NOT regress display or re-open the confirmed state
+                        self._log(
+                            f"  WARN {sid}: confirmed at rev {expected} "
+                            f"but status now reports rev {actual} — keeping confirmed"
+                        )
+
+            if len(confirmed) == len(sensor_ids):
                 self._write_event(writer, f, "config_applied_all", config_file, purpose,
                                   details=f"attempt={attempt}")
-                self._log("All sensors applied the new config")
+                self._log(f"All {len(sensor_ids)} sensors applied config (attempt {attempt})")
                 return True
 
-            self._log(f"Waiting {retry_interval} min...")
+            still_pending = [s for s in sensor_ids if s not in confirmed]
+            self._log(f"  Still pending: {still_pending}. Waiting {retry_interval} min...")
             self._interruptible_sleep(retry_interval * 60)
 
         return False

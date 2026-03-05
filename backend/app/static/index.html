@@ -1019,10 +1019,7 @@ function updateProfilerUI(d) {
     }
     btnStart.disabled = false;
     btnStop.disabled = true;
-    if (profilerPollInterval) {
-      clearInterval(profilerPollInterval);
-      profilerPollInterval = null;
-    }
+    // Polling continua ativo — não parar aqui para garantir estado sempre atualizado
   }
 
   document.getElementById('profilerCurrentStep').textContent = d.current_step || '—';
@@ -1088,6 +1085,8 @@ refreshExperiments();
 startLogUpdates();
 setInterval(fetchDevices, 5000);
 setInterval(updateCaptureStatus, 2000);
+// Polling do profiler sempre ativo, independente de tab ou refresh
+startProfilerPoll();
 </script>
 </body>
 </html>
