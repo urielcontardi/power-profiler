@@ -1,0 +1,10 @@
+fastapi
+uvicorn[standard]
+python-multipart
+joulescope
+pyjoulescope-driver>=1.9
+numpy
+pandas
+plotly
+tzdata
+requests

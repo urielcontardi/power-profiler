@@ -1,0 +1,988 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Joulescope Logger</title>
+<script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#0d1117;--surface:#161b22;--border:#30363d;
+  --text:#c9d1d9;--text-dim:#8b949e;--accent:#58a6ff;
+  --green:#3fb950;--red:#f85149;--yellow:#d29922;--orange:#f0883e;
+  --purple:#a371f7;
+}
+html,body{height:100%;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+  background:var(--bg);color:var(--text)}
+body{display:flex;flex-direction:column}
+
+header{display:flex;align-items:center;justify-content:space-between;
+  padding:12px 20px;background:var(--surface);border-bottom:1px solid var(--border)}
+header h1{font-size:18px;font-weight:600}
+header h1 span{color:var(--accent)}
+.header-status{font-size:12px;color:var(--text-dim)}
+
+/* Tab system */
+.tab-bar{display:flex;gap:0;background:var(--surface);border-bottom:1px solid var(--border);padding:0 20px}
+.tab-btn{padding:10px 20px;border:none;background:none;color:var(--text-dim);
+  font-size:14px;cursor:pointer;border-bottom:2px solid transparent;transition:.15s;font-family:inherit}
+.tab-btn.active{color:var(--accent);border-bottom-color:var(--accent)}
+.tab-btn:hover:not(.active){color:var(--text)}
+.tab-panel{display:none;flex:1;overflow:auto}
+.tab-panel.active{display:block}
+
+.main{padding:20px;display:grid;grid-template-columns:1fr 1fr;gap:20px;align-content:start}
+@media(max-width:900px){.main{grid-template-columns:1fr}}
+
+.section{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:20px}
+.section h2{font-size:15px;font-weight:600;margin-bottom:16px;color:var(--accent);display:flex;align-items:center;gap:8px}
+.section-header{display:flex;align-items:center;justify-content:space-between;cursor:pointer;user-select:none}
+.section-header h2{margin-bottom:0}
+.section-body{margin-top:16px}
+
+.form-group{margin-bottom:12px}
+.form-group label{display:block;font-size:12px;color:var(--text-dim);margin-bottom:4px;font-weight:500}
+.form-input{width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;
+  background:var(--bg);color:var(--text);font-size:13px}
+.form-input:focus{outline:none;border-color:var(--accent)}
+.form-row{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+
+.btn{padding:8px 16px;border:1px solid var(--border);border-radius:6px;
+  background:var(--bg);color:var(--text);font-size:13px;cursor:pointer;transition:.15s;font-family:inherit}
+.btn:hover{border-color:var(--accent);color:var(--accent)}
+.btn-start{border-color:var(--green);color:var(--green);font-weight:600}
+.btn-start:hover{background:rgba(63,185,80,0.1)}
+.btn-stop{border-color:var(--red);color:var(--red);font-weight:600}
+.btn-stop:hover{background:rgba(248,81,73,0.1)}
+.btn-sm{padding:4px 10px;font-size:12px}
+.btn:disabled{opacity:.4;cursor:not-allowed}
+
+.status-badge{padding:4px 10px;border-radius:6px;font-size:12px;font-weight:600}
+.status-badge.running{background:rgba(63,185,80,0.2);color:var(--green)}
+.status-badge.stopped{background:rgba(139,148,158,0.2);color:var(--text-dim)}
+.status-badge.completed{background:rgba(163,113,247,0.2);color:var(--purple)}
+
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin:16px 0}
+.stat-box{background:var(--bg);padding:12px;border-radius:6px;border-left:4px solid var(--accent)}
+.stat-label{font-size:11px;color:var(--text-dim);text-transform:uppercase}
+.stat-value{font-size:18px;font-weight:600;color:var(--text)}
+
+.select-row{display:flex;gap:8px;align-items:center;margin-bottom:12px}
+select.form-input{flex:1;min-width:0}
+
+.plot-container{margin-top:12px;border:1px solid var(--border);border-radius:8px;overflow:hidden;background:var(--bg)}
+.log-panel{margin-top:12px;border:1px solid var(--border);border-radius:8px;background:var(--bg);
+  max-height:220px;overflow:auto;padding:10px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;line-height:1.4}
+.log-line{white-space:pre-wrap;word-break:break-word;margin-bottom:4px}
+.log-INFO{color:#8b949e}.log-WARNING{color:#d29922}.log-ERROR{color:#f85149}
+
+.live-indicator{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--green)}
+.live-dot{width:8px;height:8px;border-radius:50%;background:var(--green);animation:pulse 1.5s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+.device-ok{background:rgba(63,185,80,0.15);border:1px solid rgba(63,185,80,0.4);color:var(--green)}
+.device-err{background:rgba(248,81,73,0.15);border:1px solid rgba(248,81,73,0.4);color:var(--red)}
+.device-checking{background:rgba(139,148,158,0.1);border:1px solid var(--border);color:var(--text-dim)}
+
+/* Profiler specific */
+.profiler-main{padding:20px;display:flex;flex-direction:column;gap:20px}
+table.data-table{width:100%;border-collapse:collapse;font-size:13px}
+table.data-table th,table.data-table td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--border)}
+table.data-table th{color:var(--text-dim);font-size:12px;font-weight:500}
+table.data-table td input{background:var(--bg);border:1px solid var(--border);border-radius:4px;
+  color:var(--text);padding:4px 8px;width:100%;font-size:12px}
+table.data-table td input:focus{outline:none;border-color:var(--accent)}
+.sensor-ok{color:var(--green)}
+.sensor-waiting{color:var(--text-dim)}
+.sensor-applied{color:var(--green);font-weight:600}
+.sensor-error{color:var(--red)}
+.toggle-arrow{color:var(--text-dim);transition:.2s;display:inline-block}
+.toggle-arrow.collapsed{transform:rotate(-90deg)}
+</style>
+</head>
+<body>
+
+<header>
+  <h1><span>&#9889;</span> Joulescope Logger</h1>
+  <div class="header-status" id="header-status">
+    <span id="device-status">Verificando dispositivos...</span>
+    <span id="capture-status" class="status-badge stopped">Parado</span>
+  </div>
+</header>
+
+<!-- Tab Bar -->
+<div class="tab-bar">
+  <button class="tab-btn active" onclick="switchTab('logger')">&#9889; Logger</button>
+  <button class="tab-btn" onclick="switchTab('profiler')">&#128300; Power Profiler</button>
+</div>
+
+<!-- ===== TAB: Logger ===== -->
+<div id="tab-logger" class="tab-panel active">
+<div class="main">
+
+  <!-- Capture -->
+  <div class="section">
+    <h2>&#9654; Captura</h2>
+    <div id="deviceCheck" class="device-checking" style="margin-bottom:16px;padding:12px;border-radius:6px;font-size:13px;display:flex;align-items:center;gap:8px">
+      <span id="deviceCheckIcon" style="font-size:18px">&#8987;</span>
+      <span id="deviceCheckText">Verificando dispositivo Joulescope...</span>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label>Janela de processamento (segundos, 0 = contínuo/infinito)</label>
+        <input type="number" id="windowDuration" class="form-input" value="0" min="0" step="0.1">
+      </div>
+      <div class="form-group">
+        <label>Arquivo de saída</label>
+        <input type="text" id="outputFile" class="form-input" value="joulescope_log.csv">
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label>Taxa de amostragem (Hz, opcional)</label>
+        <input type="number" id="samplingRate" class="form-input" placeholder="Auto" min="1">
+      </div>
+      <div class="form-group">
+        <label>Máx. janelas (0 = ilimitado)</label>
+        <input type="number" id="maxWindows" class="form-input" value="0" min="0">
+      </div>
+    </div>
+    <div class="form-group">
+      <label>Rotacionar arquivo CSV a cada (min, 0 = um único arquivo)</label>
+      <input type="number" id="rotateInterval" class="form-input" value="60" min="0" step="1" title="Novo arquivo a cada N minutos para melhor performance">
+    </div>
+    <div style="display:flex;gap:8px;margin-top:16px">
+      <button class="btn btn-start" id="btnStart" onclick="startCapture()">Iniciar Captura</button>
+      <button class="btn btn-stop" id="btnStop" onclick="stopCapture()" disabled>Parar</button>
+    </div>
+    <div id="captureInfo" style="margin-top:12px;font-size:12px;color:var(--text-dim)"></div>
+  </div>
+
+  <!-- Experiments -->
+  <div class="section">
+    <h2>&#128196; Experimentos</h2>
+    <div class="select-row">
+      <select id="experimentSelect" class="form-input" onchange="loadExperiment()">
+        <option value="">-- Selecione um arquivo --</option>
+      </select>
+      <button class="btn" onclick="refreshExperiments()">Atualizar</button>
+      <button class="btn" onclick="downloadCsv()" id="btnDownload" title="Baixar CSV" disabled>&#8681; Baixar CSV</button>
+      <button class="btn btn-stop" onclick="deleteCsv()" id="btnDelete" title="Deletar CSV" disabled>&#128465; Deletar CSV</button>
+    </div>
+    <div id="experimentStats" class="stats" style="display:none"></div>
+  </div>
+
+  <!-- Plots - full width -->
+  <div class="section" style="grid-column:1/-1">
+    <h2>
+      <span>&#128200;</span> Gráficos
+      <span style="font-size:12px;font-weight:400;color:var(--text-dim);margin-left:8px">(use os botões ou o slider para selecionar intervalo de tempo)</span>
+      <span id="liveIndicator" class="live-indicator" style="display:none">
+        <span class="live-dot"></span> Ao vivo
+      </span>
+    </h2>
+    <div id="timeSeriesPlot" class="plot-container" style="height:400px"></div>
+    <div id="energyPlot" class="plot-container" style="height:300px;margin-top:12px"></div>
+  </div>
+
+  <div class="section" style="grid-column:1/-1">
+    <h2><span>&#128221;</span> Logs da Captura</h2>
+    <div id="logPanel" class="log-panel">Aguardando logs...</div>
+  </div>
+
+  <div class="section" style="grid-column:1/-1">
+    <h2><span>&#128268;</span> Diagnóstico USB (driver / hardware)</h2>
+    <p style="font-size:12px;color:var(--text-dim);margin-bottom:12px">
+      Avalia o que o container enxerga: lsusb, nós em /dev/bus/usb, udev e se o driver Python vê o Joulescope. Ajuda a distinguir problema de hardware/cabo/hub vs driver/permissão.
+    </p>
+    <button class="btn" id="btnDiagnostics" onclick="runDiagnostics()">Executar diagnóstico</button>
+    <div id="diagnosticsResult" class="log-panel" style="margin-top:12px;min-height:80px;display:none"></div>
+  </div>
+
+</div>
+</div>
+
+<!-- ===== TAB: Power Profiler ===== -->
+<div id="tab-profiler" class="tab-panel">
+<div class="profiler-main">
+
+  <!-- Panel 1: IoT Settings -->
+  <div class="section">
+    <div class="section-header" onclick="toggleSection('settingsBody', 'settingsArrow')">
+      <h2>&#9881; Configurações IoT <span class="toggle-arrow" id="settingsArrow">&#9660;</span></h2>
+    </div>
+    <div class="section-body" id="settingsBody">
+      <div class="form-row">
+        <div class="form-group">
+          <label>Base URL</label>
+          <input type="text" id="pBaseUrl" class="form-input" placeholder="https://iot.int.tractian.com">
+        </div>
+        <div class="form-group">
+          <label>User ID (x-user-id)</label>
+          <input type="text" id="pUserId" class="form-input" placeholder="user-id">
+        </div>
+      </div>
+      <div class="form-group">
+        <label>Sensor IDs (um por linha)</label>
+        <textarea id="pSensorIds" class="form-input" rows="4" placeholder="RBT9269&#10;PNI6508&#10;..."></textarea>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>
+            <input type="checkbox" id="pCheckFirmware" style="margin-right:6px">
+            Verificar firmware (ST3001*)
+          </label>
+        </div>
+        <div class="form-group">
+          <label>Intervalo de retry (minutos)</label>
+          <input type="number" id="pRetryInterval" class="form-input" value="1" min="1">
+        </div>
+      </div>
+      <button class="btn btn-start" onclick="saveProfilerSettings()">Salvar Configurações</button>
+      <span id="settingsSavedMsg" style="margin-left:10px;font-size:12px;color:var(--green);display:none">Salvo!</span>
+    </div>
+  </div>
+
+  <!-- Panel 2: Config Files -->
+  <div class="section">
+    <h2>&#128196; Config Files</h2>
+    <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px">
+      <input type="file" id="configFileInput" accept=".json" multiple style="display:none" onchange="uploadConfigs()">
+      <button class="btn" onclick="document.getElementById('configFileInput').click()">&#8679; Upload JSON(s)</button>
+      <button class="btn" onclick="refreshConfigs()">Atualizar</button>
+    </div>
+    <table class="data-table">
+      <thead><tr><th>Nome</th><th>Tamanho</th><th></th></tr></thead>
+      <tbody id="configsTableBody"><tr><td colspan="3" style="color:var(--text-dim)">Nenhum arquivo</td></tr></tbody>
+    </table>
+  </div>
+
+  <!-- Panel 3: Sequence -->
+  <div class="section">
+    <h2>&#128203; Sequência de Teste</h2>
+    <div class="form-row" style="margin-bottom:12px">
+      <div class="form-group">
+        <label>Nome do teste</label>
+        <input type="text" id="seqName" class="form-input" placeholder="Power Profiler - Calibração">
+      </div>
+    </div>
+    <table class="data-table" id="sequenceTable">
+      <thead>
+        <tr>
+          <th>Config</th><th>Horas</th><th>Min</th><th>Propósito</th><th></th>
+        </tr>
+      </thead>
+      <tbody id="sequenceBody">
+        <!-- rows added dynamically -->
+      </tbody>
+    </table>
+    <div style="display:flex;gap:8px;margin-top:12px">
+      <button class="btn" onclick="addSequenceStep()">+ Adicionar Step</button>
+      <button class="btn btn-start" onclick="saveSequence()">Salvar Sequência</button>
+      <span id="seqSavedMsg" style="margin-left:6px;font-size:12px;color:var(--green);display:none">Salvo!</span>
+    </div>
+  </div>
+
+  <!-- Panel 4: Execution -->
+  <div class="section">
+    <h2>&#9654; Execução</h2>
+    <div style="display:flex;gap:8px;align-items:center;margin-bottom:16px">
+      <button class="btn btn-start" id="btnProfilerStart" onclick="startProfilerRun()">Iniciar Teste</button>
+      <button class="btn btn-stop" id="btnProfilerStop" onclick="stopProfilerRun()" disabled>Parar</button>
+      <span id="profilerStatusBadge" class="status-badge stopped">Parado</span>
+    </div>
+
+    <div style="font-size:13px;margin-bottom:12px">
+      <div><span style="color:var(--text-dim)">Etapa atual:</span> <span id="profilerCurrentStep" style="color:var(--text)">—</span></div>
+      <div style="margin-top:4px"><span style="color:var(--text-dim)">Config ativa:</span> <span id="profilerCurrentConfig" style="font-family:monospace;color:var(--accent)">—</span></div>
+    </div>
+
+    <div style="margin-bottom:12px">
+      <div style="font-size:12px;color:var(--text-dim);margin-bottom:6px;font-weight:500">SENSORES</div>
+      <table class="data-table" id="profilerSensorTable">
+        <thead><tr><th>Sensor ID</th><th>Status</th></tr></thead>
+        <tbody id="profilerSensorBody"><tr><td colspan="2" style="color:var(--text-dim)">Configure os sensores nas Configurações IoT</td></tr></tbody>
+      </table>
+    </div>
+
+    <div id="profilerEventsLink" style="margin-bottom:12px;display:none">
+      <span style="font-size:12px;color:var(--text-dim)">Arquivo de eventos: </span>
+      <a id="profilerEventsHref" href="#" style="color:var(--accent);font-size:12px;font-family:monospace" download></a>
+    </div>
+
+    <div style="font-size:12px;color:var(--text-dim);margin-bottom:6px;font-weight:500">LOG</div>
+    <div id="profilerLogPanel" class="log-panel" style="max-height:280px">Aguardando...</div>
+  </div>
+
+  <!-- Events CSV list -->
+  <div class="section">
+    <h2>&#128196; Arquivos de Eventos</h2>
+    <button class="btn" onclick="refreshEventFiles()" style="margin-bottom:12px">Atualizar</button>
+    <table class="data-table">
+      <thead><tr><th>Arquivo</th><th>Tamanho</th><th></th></tr></thead>
+      <tbody id="eventsFilesBody"><tr><td colspan="3" style="color:var(--text-dim)">Nenhum arquivo</td></tr></tbody>
+    </table>
+  </div>
+
+</div>
+</div>
+
+<script>
+// ================================================================
+// Tab switching
+// ================================================================
+function switchTab(name) {
+  document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById('tab-' + name).classList.add('active');
+  event.currentTarget.classList.add('active');
+  if (name === 'profiler') {
+    loadProfilerSettings();
+    refreshConfigs();
+    loadSequence();
+    refreshEventFiles();
+  }
+}
+
+function toggleSection(bodyId, arrowId) {
+  const body = document.getElementById(bodyId);
+  const arrow = document.getElementById(arrowId);
+  const hidden = body.style.display === 'none';
+  body.style.display = hidden ? 'block' : 'none';
+  arrow.classList.toggle('collapsed', !hidden);
+}
+
+// ================================================================
+// Logger tab — original code
+// ================================================================
+let ws = null;
+let liveUpdateInterval = null;
+let currentExperiment = null;
+let logUpdateInterval = null;
+let lastLogSignature = '';
+
+const $deviceStatus = document.getElementById('device-status');
+const $captureStatus = document.getElementById('capture-status');
+const $captureInfo = document.getElementById('captureInfo');
+const $btnStart = document.getElementById('btn-start') || document.getElementById('btnStart');
+const $btnStop = document.getElementById('btn-stop') || document.getElementById('btnStop');
+const $expSelect = document.getElementById('experimentSelect');
+const $expStats = document.getElementById('experimentStats');
+const $liveIndicator = document.getElementById('liveIndicator');
+
+let deviceAvailable = false;
+
+async function fetchDevices() {
+  try {
+    const r = await fetch('/api/devices');
+    const d = await r.json();
+    const devices = d.devices || [];
+    const $check = document.getElementById('deviceCheck');
+    const $icon = document.getElementById('deviceCheckIcon');
+    const $text = document.getElementById('deviceCheckText');
+    if (devices.length && devices[0].error) {
+      deviceAvailable = false;
+      $deviceStatus.textContent = 'Erro: ' + devices[0].error;
+      $check.className = 'device-err';
+      $icon.textContent = '\u2717';
+      $text.textContent = 'Dispositivo não encontrado: ' + devices[0].error;
+    } else if (devices.length) {
+      deviceAvailable = true;
+      $deviceStatus.textContent = devices.length + ' dispositivo(s) encontrado(s)';
+      $check.className = 'device-ok';
+      $icon.textContent = '\u2713';
+      $text.textContent = 'Joulescope conectado: ' + (devices[0].name || devices.length + ' dispositivo(s)');
+    } else {
+      deviceAvailable = false;
+      $deviceStatus.textContent = 'Nenhum Joulescope conectado';
+      $check.className = 'device-err';
+      $icon.textContent = '\u2717';
+      $text.textContent = 'Conecte o Joulescope via USB antes de iniciar a captura.';
+    }
+    if (!document.getElementById('capture-status').textContent.includes('Capturando')) {
+      $btnStart.disabled = !deviceAvailable;
+    }
+  } catch (e) {
+    deviceAvailable = false;
+    $deviceStatus.textContent = 'Erro ao verificar';
+    document.getElementById('deviceCheckText').textContent = 'Erro ao verificar dispositivos.';
+    $btnStart.disabled = true;
+  }
+}
+
+async function updateCaptureStatus() {
+  try {
+    const r = await fetch('/api/capture/status');
+    const s = await r.json();
+    if (!('running' in s)) return s;
+    if (s.running) {
+      $captureStatus.textContent = 'Capturando';
+      $captureStatus.className = 'status-badge running';
+      $btnStart.disabled = true;
+      $btnStop.disabled = false;
+      const files = s.output_files && s.output_files.length ? s.output_files : (s.output_file ? [s.output_file] : []);
+      const fileInfo = files.length > 1 ? `${files.length} arquivos` : (files[0] ? files[0].split('/').pop() : 'N/A');
+      $captureInfo.textContent = `Arquivo(s): ${fileInfo} | Janelas: ${s.window_count || 0} | Energia: ${(s.total_energy || 0).toFixed(4)} J`;
+    } else {
+      $captureStatus.textContent = 'Parado';
+      $captureStatus.className = 'status-badge stopped';
+      $btnStart.disabled = !deviceAvailable;
+      $btnStop.disabled = true;
+      $captureInfo.textContent = '';
+    }
+    return s;
+  } catch { return {}; }
+}
+
+async function startCapture() {
+  const body = {
+    window_duration: parseFloat(document.getElementById('windowDuration').value) || 0,
+    output_file: document.getElementById('outputFile').value || 'joulescope_log.csv',
+    sampling_rate: document.getElementById('samplingRate').value || null,
+    max_windows: parseInt(document.getElementById('maxWindows').value) || 0,
+    rotate_interval_minutes: parseFloat(document.getElementById('rotateInterval').value) || 0,
+  };
+  if (body.sampling_rate) body.sampling_rate = parseFloat(body.sampling_rate);
+  if (body.rotate_interval_minutes <= 0) body.rotate_interval_minutes = 0;
+  try {
+    const r = await fetch('/api/capture/start', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(body),
+    });
+    const d = await r.json();
+    if (d.error) { alert('Erro: ' + d.error); return; }
+    await updateCaptureStatus();
+    connectWs();
+    setTimeout(() => {
+      refreshExperiments();
+      selectAndLoad(body.output_file);
+      startLiveUpdates(body.output_file);
+    }, 2000);
+  } catch (e) { alert('Erro: ' + e.message); }
+}
+
+async function stopCapture() {
+  try {
+    await fetch('/api/capture/stop', { method: 'POST' });
+    disconnectWs();
+    stopLiveUpdates();
+    await updateCaptureStatus();
+    $btnStart.disabled = false;
+    $btnStop.disabled = true;
+    refreshExperiments();
+  } catch (e) { alert('Erro: ' + e.message); }
+}
+
+function connectWs() {
+  if (ws) return;
+  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  ws = new WebSocket(proto + '//' + location.host + '/api/ws/capture');
+  ws.onmessage = (e) => {
+    try {
+      const d = JSON.parse(e.data);
+      $captureInfo.textContent = `Arquivo: ${currentExperiment || 'N/A'} | Janelas: ${d.window_num || 0} | Energia: ${(d.total_energy || 0).toFixed(4)} J`;
+    } catch {}
+  };
+  ws.onclose = () => { ws = null; };
+  $liveIndicator.style.display = 'inline-flex';
+}
+
+function disconnectWs() {
+  if (ws) { ws.close(); ws = null; }
+  $liveIndicator.style.display = 'none';
+}
+
+async function refreshExperiments() {
+  try {
+    const r = await fetch('/api/experiments');
+    const d = await r.json();
+    const files = d.files || [];
+    const sel = $expSelect;
+    const cur = sel.value;
+    sel.innerHTML = '<option value="">-- Selecione um arquivo --</option>';
+    files.forEach(f => {
+      const opt = document.createElement('option');
+      opt.value = f.path;
+      opt.textContent = f.name;
+      sel.appendChild(opt);
+    });
+    if (cur) sel.value = cur;
+  } catch {}
+}
+
+function selectAndLoad(filepath) {
+  const name = filepath.split('/').pop() || filepath;
+  const opts = $expSelect.options;
+  for (let i = 0; i < opts.length; i++) {
+    if (opts[i].value && opts[i].value.endsWith(name)) {
+      $expSelect.value = opts[i].value;
+      loadExperiment();
+      return;
+    }
+  }
+}
+
+async function loadExperiment() {
+  const path = $expSelect.value;
+  const btnDownload = document.getElementById('btnDownload');
+  const btnDelete = document.getElementById('btnDelete');
+  if (!path) {
+    $expStats.style.display = 'none';
+    document.getElementById('timeSeriesPlot').innerHTML = '';
+    document.getElementById('energyPlot').innerHTML = '';
+    if (btnDownload) btnDownload.disabled = true;
+    if (btnDelete) btnDelete.disabled = true;
+    return;
+  }
+  if (btnDownload) btnDownload.disabled = false;
+  if (btnDelete) btnDelete.disabled = false;
+  currentExperiment = path.split('/').pop();
+  try {
+    const r = await fetch('/api/experiment/' + encodeURIComponent(path));
+    const d = await r.json();
+    if (d.error) { alert('Erro: ' + d.error); return; }
+    displayStats(d.stats);
+    if (d.plots && d.plots.time_series) {
+      const figTs = JSON.parse(d.plots.time_series);
+      Plotly.newPlot('timeSeriesPlot', figTs.data, figTs.layout, {responsive: true});
+    } else {
+      document.getElementById('timeSeriesPlot').innerHTML = '<div style="padding:20px;color:var(--text-dim)">Sem dados para exibir</div>';
+    }
+    if (d.plots && d.plots.energy) {
+      const figEn = JSON.parse(d.plots.energy);
+      Plotly.newPlot('energyPlot', figEn.data, figEn.layout, {responsive: true});
+    } else {
+      document.getElementById('energyPlot').innerHTML = '';
+    }
+  } catch (e) { console.error(e); }
+}
+
+function displayStats(stats) {
+  if (!stats) return;
+  $expStats.style.display = 'grid';
+  const items = [
+    { label: 'Janelas', value: stats.total_windows },
+    { label: 'Energia Total', value: stats.total_energy + ' J' },
+    { label: 'Energia', value: stats.total_energy_mwh + ' mWh' },
+    { label: 'Corrente média', value: stats.avg_current + ' A' },
+    { label: 'Tensão média', value: stats.avg_voltage + ' V' },
+    { label: 'Potência média', value: stats.avg_power + ' W' },
+    { label: 'Duração', value: stats.duration },
+  ];
+  $expStats.innerHTML = items.map(i =>
+    `<div class="stat-box"><div class="stat-label">${i.label}</div><div class="stat-value">${i.value}</div></div>`
+  ).join('');
+}
+
+let lastWindowCount = 0;
+function startLiveUpdates(filepath) {
+  stopLiveUpdates();
+  liveUpdateInterval = setInterval(async () => {
+    const path = $expSelect.value || filepath;
+    if (!path) return;
+    try {
+      const r = await fetch('/api/experiment/' + encodeURIComponent(path));
+      const d = await r.json();
+      if (d.error) return;
+      if (d.stats && d.stats.total_windows > lastWindowCount) {
+        lastWindowCount = d.stats.total_windows;
+        displayStats(d.stats);
+        if (d.plots && d.plots.time_series) {
+          const figTs = JSON.parse(d.plots.time_series);
+          Plotly.react('timeSeriesPlot', figTs.data, figTs.layout, {responsive: true});
+        }
+        if (d.plots && d.plots.energy) {
+          const figEn = JSON.parse(d.plots.energy);
+          Plotly.react('energyPlot', figEn.data, figEn.layout, {responsive: true});
+        }
+      }
+    } catch {}
+  }, 3000);
+}
+
+function stopLiveUpdates() {
+  if (liveUpdateInterval) { clearInterval(liveUpdateInterval); liveUpdateInterval = null; }
+  lastWindowCount = 0;
+}
+
+function formatLogTime(iso) {
+  try { return new Date(iso).toLocaleTimeString('pt-BR', { hour12: false }); }
+  catch { return iso || '--:--:--'; }
+}
+
+async function refreshLogs() {
+  const panel = document.getElementById('logPanel');
+  if (!panel) return;
+  try {
+    const r = await fetch('/api/logs?limit=250');
+    const d = await r.json();
+    const events = d.events || [];
+    const sig = events.length ? `${events.length}|${events[events.length - 1].timestamp}|${events[events.length - 1].message}` : '0';
+    if (sig === lastLogSignature) return;
+    lastLogSignature = sig;
+    if (!events.length) { panel.textContent = 'Sem logs ainda.'; return; }
+    panel.innerHTML = events.map(ev => {
+      const lvl = (ev.level || 'INFO').toUpperCase();
+      return `<div class="log-line log-${lvl}">[${formatLogTime(ev.timestamp)}] [${lvl}] ${ev.message || ''}</div>`;
+    }).join('');
+    panel.scrollTop = panel.scrollHeight;
+  } catch (e) { panel.textContent = 'Erro ao carregar logs.'; }
+}
+
+function startLogUpdates() {
+  if (logUpdateInterval) clearInterval(logUpdateInterval);
+  refreshLogs();
+  logUpdateInterval = setInterval(refreshLogs, 2000);
+}
+
+function downloadCsv() {
+  const path = $expSelect.value;
+  if (!path) return;
+  const filename = path.split('/').pop() || path;
+  window.location.href = '/api/download/' + encodeURIComponent(filename);
+}
+
+async function runDiagnostics() {
+  const btn = document.getElementById('btnDiagnostics');
+  const out = document.getElementById('diagnosticsResult');
+  out.style.display = 'block';
+  out.innerHTML = 'Executando diagnóstico...';
+  btn.disabled = true;
+  try {
+    const r = await fetch('/api/diagnostics');
+    const d = await r.json();
+    if (d.error) { out.innerHTML = '<span class="log-ERROR">Erro: ' + escapeHtml(d.error) + '</span>'; return; }
+    let html = '';
+    if (d.summary) html += '<div class="log-line" style="font-weight:600;margin-bottom:8px">' + escapeHtml(d.summary) + '</div>';
+    if (d.conclusion && d.conclusion.length) {
+      html += '<div style="margin-bottom:8px">';
+      d.conclusion.forEach(function(line) { html += '<div class="log-line log-WARNING">' + escapeHtml(line) + '</div>'; });
+      html += '</div>';
+    }
+    html += '<details style="margin-top:8px"><summary style="cursor:pointer;color:var(--accent)">Detalhes (lsusb, árvore, /dev, udev)</summary><pre style="white-space:pre-wrap;font-size:11px;margin-top:8px">';
+    if (d.lsusb) html += '--- lsusb ---\n' + escapeHtml(d.lsusb) + '\n\n';
+    if (d.lsusb_tree) html += '--- lsusb -t ---\n' + escapeHtml(d.lsusb_tree) + '\n\n';
+    if (d.dev_bus_usb && d.dev_bus_usb.length) {
+      html += '--- /dev/bus/usb (primeiros 20) ---\n';
+      d.dev_bus_usb.slice(0, 20).forEach(function(n) {
+        html += (n.path || '') + ' mode=' + (n.mode || '') + ' uid=' + (n.uid ?? '') + ' gid=' + (n.gid ?? '') + (n.error ? ' error=' + n.error : '') + '\n';
+      });
+      if (d.dev_bus_usb.length > 20) html += '... (' + d.dev_bus_usb.length + ' total)\n';
+      html += '\n';
+    }
+    if (d.udevadm_joulescope) html += '--- udevadm (Joulescope 16d0:10ba) ---\n' + escapeHtml(d.udevadm_joulescope) + '\n';
+    html += '</pre></details>';
+    out.innerHTML = html;
+  } catch (e) {
+    out.innerHTML = '<span class="log-ERROR">Erro: ' + escapeHtml(e.message) + '</span>';
+  } finally { btn.disabled = false; }
+}
+
+function escapeHtml(s) {
+  if (s == null) return '';
+  const div = document.createElement('div');
+  div.textContent = s;
+  return div.innerHTML;
+}
+
+async function deleteCsv() {
+  const path = $expSelect.value;
+  if (!path) return;
+  const filename = path.split('/').pop() || path;
+  if (!window.confirm(`Deseja deletar o arquivo ${filename}?`)) return;
+  try {
+    const r = await fetch('/api/experiment/' + encodeURIComponent(filename), { method: 'DELETE' });
+    const d = await r.json();
+    if (!r.ok || d.error) { alert('Erro ao deletar: ' + (d.error || r.statusText)); return; }
+    currentExperiment = null;
+    $expSelect.value = '';
+    $expStats.style.display = 'none';
+    document.getElementById('timeSeriesPlot').innerHTML = '';
+    document.getElementById('energyPlot').innerHTML = '';
+    document.getElementById('btnDownload').disabled = true;
+    document.getElementById('btnDelete').disabled = true;
+    await refreshExperiments();
+  } catch (e) { alert('Erro ao deletar: ' + e.message); }
+}
+
+// ================================================================
+// Power Profiler tab
+// ================================================================
+let profilerPollInterval = null;
+let availableConfigs = [];
+
+async function loadProfilerSettings() {
+  try {
+    const r = await fetch('/api/profiler/settings');
+    const d = await r.json();
+    document.getElementById('pBaseUrl').value = d.base_url || '';
+    document.getElementById('pUserId').value = d.user_id || '';
+    document.getElementById('pSensorIds').value = (d.sensor_ids || []).join('\n');
+    document.getElementById('pCheckFirmware').checked = !!d.check_firmware;
+    document.getElementById('pRetryInterval').value = d.retry_interval_minutes || 1;
+  } catch (e) { console.error('Error loading settings', e); }
+}
+
+async function saveProfilerSettings() {
+  const sensor_ids = document.getElementById('pSensorIds').value
+    .split('\n').map(s => s.trim()).filter(Boolean);
+  const body = {
+    base_url: document.getElementById('pBaseUrl').value.trim(),
+    user_id: document.getElementById('pUserId').value.trim(),
+    sensor_ids,
+    check_firmware: document.getElementById('pCheckFirmware').checked,
+    retry_interval_minutes: parseInt(document.getElementById('pRetryInterval').value) || 1,
+  };
+  try {
+    await fetch('/api/profiler/settings', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(body),
+    });
+    const msg = document.getElementById('settingsSavedMsg');
+    msg.style.display = 'inline';
+    setTimeout(() => { msg.style.display = 'none'; }, 2000);
+  } catch (e) { alert('Erro: ' + e.message); }
+}
+
+async function refreshConfigs() {
+  try {
+    const r = await fetch('/api/profiler/configs');
+    const d = await r.json();
+    availableConfigs = (d.configs || []).map(c => c.name);
+    const tbody = document.getElementById('configsTableBody');
+    if (!d.configs || !d.configs.length) {
+      tbody.innerHTML = '<tr><td colspan="3" style="color:var(--text-dim)">Nenhum arquivo</td></tr>';
+      return;
+    }
+    tbody.innerHTML = d.configs.map(c => `
+      <tr>
+        <td style="font-family:monospace">${escapeHtml(c.name)}</td>
+        <td style="color:var(--text-dim)">${(c.size / 1024).toFixed(1)} KB</td>
+        <td><button class="btn btn-sm btn-stop" onclick="deleteConfig('${escapeHtml(c.name)}')">&#128465;</button></td>
+      </tr>`).join('');
+    refreshSequenceSelects();
+  } catch (e) { console.error('Error loading configs', e); }
+}
+
+async function uploadConfigs() {
+  const input = document.getElementById('configFileInput');
+  const files = input.files;
+  if (!files.length) return;
+  for (const file of files) {
+    const form = new FormData();
+    form.append('file', file);
+    try {
+      const r = await fetch('/api/profiler/configs', { method: 'POST', body: form });
+      const d = await r.json();
+      if (d.error) alert('Erro ao enviar ' + file.name + ': ' + d.error);
+    } catch (e) { alert('Erro: ' + e.message); }
+  }
+  input.value = '';
+  await refreshConfigs();
+}
+
+async function deleteConfig(name) {
+  if (!window.confirm(`Deletar ${name}?`)) return;
+  try {
+    await fetch('/api/profiler/configs/' + encodeURIComponent(name), { method: 'DELETE' });
+    await refreshConfigs();
+  } catch (e) { alert('Erro: ' + e.message); }
+}
+
+// Sequence
+let sequenceSteps = [];
+
+async function loadSequence() {
+  try {
+    const r = await fetch('/api/profiler/sequence');
+    const d = await r.json();
+    document.getElementById('seqName').value = d.name || '';
+    sequenceSteps = (d.steps || []).map(s => ({...s}));
+    renderSequence();
+  } catch (e) { console.error('Error loading sequence', e); }
+}
+
+function renderSequence() {
+  const tbody = document.getElementById('sequenceBody');
+  if (!sequenceSteps.length) {
+    tbody.innerHTML = '<tr><td colspan="5" style="color:var(--text-dim)">Nenhum step. Clique "+ Adicionar Step".</td></tr>';
+    return;
+  }
+  tbody.innerHTML = sequenceSteps.map((s, i) => `
+    <tr>
+      <td>
+        <select class="form-input" style="font-size:12px" onchange="updateStep(${i},'config_file',this.value)">
+          <option value="">-- selecione --</option>
+          ${availableConfigs.map(c => `<option value="${escapeHtml(c)}"${c===s.config_file?' selected':''}>${escapeHtml(c)}</option>`).join('')}
+        </select>
+      </td>
+      <td><input type="number" value="${s.duration_hours||0}" min="0" onchange="updateStep(${i},'duration_hours',+this.value)"></td>
+      <td><input type="number" value="${s.duration_minutes||0}" min="0" max="59" onchange="updateStep(${i},'duration_minutes',+this.value)"></td>
+      <td><input type="text" value="${escapeHtml(s.purpose||'')}" placeholder="Propósito" onchange="updateStep(${i},'purpose',this.value)"></td>
+      <td><button class="btn btn-sm btn-stop" onclick="removeStep(${i})">&#10005;</button></td>
+    </tr>`).join('');
+}
+
+function refreshSequenceSelects() {
+  renderSequence();
+}
+
+function updateStep(i, field, value) {
+  sequenceSteps[i][field] = value;
+}
+
+function addSequenceStep() {
+  sequenceSteps.push({config_file: '', duration_hours: 1, duration_minutes: 0, purpose: ''});
+  renderSequence();
+}
+
+function removeStep(i) {
+  sequenceSteps.splice(i, 1);
+  renderSequence();
+}
+
+async function saveSequence() {
+  const body = {
+    name: document.getElementById('seqName').value.trim() || 'Power Profiler Test',
+    check_firmware: document.getElementById('pCheckFirmware').checked,
+    retry_interval_minutes: parseInt(document.getElementById('pRetryInterval').value) || 1,
+    steps: sequenceSteps,
+  };
+  try {
+    await fetch('/api/profiler/sequence', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(body),
+    });
+    const msg = document.getElementById('seqSavedMsg');
+    msg.style.display = 'inline';
+    setTimeout(() => { msg.style.display = 'none'; }, 2000);
+  } catch (e) { alert('Erro: ' + e.message); }
+}
+
+// Run control
+async function startProfilerRun() {
+  try {
+    const r = await fetch('/api/profiler/run/start', { method: 'POST' });
+    const d = await r.json();
+    if (d.error) { alert('Erro: ' + d.error); return; }
+    document.getElementById('btnProfilerStart').disabled = true;
+    document.getElementById('btnProfilerStop').disabled = false;
+    startProfilerPoll();
+  } catch (e) { alert('Erro: ' + e.message); }
+}
+
+async function stopProfilerRun() {
+  try {
+    await fetch('/api/profiler/run/stop', { method: 'POST' });
+  } catch (e) { console.error(e); }
+}
+
+function startProfilerPoll() {
+  if (profilerPollInterval) clearInterval(profilerPollInterval);
+  pollProfilerStatus();
+  profilerPollInterval = setInterval(pollProfilerStatus, 3000);
+}
+
+async function pollProfilerStatus() {
+  try {
+    const r = await fetch('/api/profiler/run/status?log_lines=50');
+    const d = await r.json();
+    updateProfilerUI(d);
+  } catch (e) { console.error('Profiler poll error', e); }
+}
+
+function updateProfilerUI(d) {
+  const badge = document.getElementById('profilerStatusBadge');
+  const btnStart = document.getElementById('btnProfilerStart');
+  const btnStop = document.getElementById('btnProfilerStop');
+
+  if (d.running) {
+    badge.textContent = 'Executando';
+    badge.className = 'status-badge running';
+    btnStart.disabled = true;
+    btnStop.disabled = false;
+  } else {
+    const step = d.current_step || '';
+    if (step === 'Completed') {
+      badge.textContent = 'Concluído';
+      badge.className = 'status-badge completed';
+    } else {
+      badge.textContent = 'Parado';
+      badge.className = 'status-badge stopped';
+    }
+    btnStart.disabled = false;
+    btnStop.disabled = true;
+    if (profilerPollInterval && !d.running) {
+      // keep polling for a bit after stop to show final state
+    }
+  }
+
+  document.getElementById('profilerCurrentStep').textContent = d.current_step || '—';
+  document.getElementById('profilerCurrentConfig').textContent = d.current_config || '—';
+
+  // Sensor table
+  const sensorBody = document.getElementById('profilerSensorBody');
+  const sensors = d.sensor_status || {};
+  if (Object.keys(sensors).length === 0) {
+    sensorBody.innerHTML = '<tr><td colspan="2" style="color:var(--text-dim)">Configure os sensores nas Configurações IoT</td></tr>';
+  } else {
+    sensorBody.innerHTML = Object.entries(sensors).map(([id, status]) => {
+      let cls = 'sensor-waiting';
+      if (status && status.toLowerCase().includes('applied')) cls = 'sensor-applied';
+      else if (status && (status.toLowerCase().includes('error') || status.toLowerCase().includes('erro'))) cls = 'sensor-error';
+      else if (status && status.toLowerCase().includes('ok')) cls = 'sensor-ok';
+      return `<tr><td style="font-family:monospace">${escapeHtml(id)}</td><td class="${cls}">${escapeHtml(status)}</td></tr>`;
+    }).join('');
+  }
+
+  // Events file link
+  if (d.events_file) {
+    const link = document.getElementById('profilerEventsLink');
+    const href = document.getElementById('profilerEventsHref');
+    link.style.display = 'block';
+    href.textContent = d.events_file;
+    href.href = '/api/download/' + encodeURIComponent(d.events_file);
+    href.download = d.events_file;
+  }
+
+  // Log panel
+  const logPanel = document.getElementById('profilerLogPanel');
+  const lines = d.log_lines || [];
+  if (lines.length) {
+    logPanel.innerHTML = lines.map(l => `<div class="log-line">${escapeHtml(l)}</div>`).join('');
+    logPanel.scrollTop = logPanel.scrollHeight;
+  }
+}
+
+async function refreshEventFiles() {
+  try {
+    const r = await fetch('/api/profiler/events');
+    const d = await r.json();
+    const tbody = document.getElementById('eventsFilesBody');
+    if (!d.files || !d.files.length) {
+      tbody.innerHTML = '<tr><td colspan="3" style="color:var(--text-dim)">Nenhum arquivo</td></tr>';
+      return;
+    }
+    tbody.innerHTML = d.files.map(f => `
+      <tr>
+        <td style="font-family:monospace">${escapeHtml(f.name)}</td>
+        <td style="color:var(--text-dim)">${(f.size / 1024).toFixed(1)} KB</td>
+        <td><a href="/api/download/${encodeURIComponent(f.name)}" download="${escapeHtml(f.name)}" class="btn btn-sm">&#8681;</a></td>
+      </tr>`).join('');
+  } catch (e) { console.error('Error loading event files', e); }
+}
+
+// ================================================================
+// Init
+// ================================================================
+fetchDevices().then(() => updateCaptureStatus());
+refreshExperiments();
+startLogUpdates();
+setInterval(fetchDevices, 5000);
+setInterval(updateCaptureStatus, 2000);
+</script>
+</body>
+</html>

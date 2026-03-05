@@ -1,0 +1,22 @@
+services:
+  joulescope-logger:
+    build: ./backend
+    container_name: joulescope-logger
+    privileged: true
+    ports:
+      - "8081:8080"
+    volumes:
+      # SD externo (Radxa). Para dev local: ./logs:/app/logs
+      - /mnt/external_sd/logs:/app/logs
+      - /dev:/dev
+      - /run/udev:/run/udev:ro
+    environment:
+      - TZ=America/Sao_Paulo
+      - LOG_DIR=/app/logs
+      - PORT=8080
+      # Captura inicia automaticamente ao subir o container (e após restart por timeout jsdrv)
+      - AUTO_START_CAPTURE=1
+      - AUTO_START_DELAY_SEC=5
+      - AUTO_CAPTURE_FILE=joulescope_log.csv
+      - AUTO_CAPTURE_ROTATE_MIN=60
+    restart: always
