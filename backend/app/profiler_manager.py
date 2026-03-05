@@ -42,8 +42,12 @@ class IoTClient:
 
     def get_last_status(self, sensor_id: str) -> dict | None:
         try:
-            data = self._get(f"/v1/smarttrac/{sensor_id}/status/last")
-            return data.get("statusV3") or data.get("statusV2") or data.get("statusV1")
+            data = self._get(f"/v1/smarttrac/{sensor_id}/status")
+            for key in ("statusV3", "statusV2", "statusV1"):
+                val = data.get(key)
+                if val:
+                    return val[0] if isinstance(val, list) else val
+            return None
         except Exception:
             return None
 
