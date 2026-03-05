@@ -81,7 +81,7 @@ After=network.target
 [Service]
 User=serial
 WorkingDirectory=/home/serial/power-profiler/backend
-Environment=LOG_DIR=/home/serial/power-profiler/logs
+Environment=LOG_DIR=/mnt/external_sd/logs
 ExecStart=/home/serial/power-profiler/backend/.venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8081
 Restart=always
 RestartSec=3
