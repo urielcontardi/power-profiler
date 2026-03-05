@@ -38,8 +38,8 @@ sudo chown -R $USER:$USER /mnt/external_sd/logs
 # Subir o container
 docker compose up -d --build
 
-# Acessar
-# http://localhost:8080
+# Acessar (porta 8081 no host; no compose: 8081:8080)
+# http://localhost:8081
 ```
 
 ### Sem Docker (desenvolvimento)
@@ -112,6 +112,24 @@ sudo systemctl restart joulescope-logger
 ```
 
 > **Nota**: O Joulescope precisa estar conectado via USB. No Linux, pode ser necessário adicionar regras udev para acesso ao dispositivo.
+
+## Rodando na Radxa (ARM64 / Linux)
+
+O projeto está pronto para rodar na Radxa:
+
+| Item | Status |
+|------|--------|
+| **Docker** | Imagem `python:3.11-slim` é multi-arquitetura; no ARM64 a build usa a imagem aarch64. |
+| **USB / Joulescope** | `privileged: true`, volume `/dev` e udev; udev no **host** (veja [Linux: regras udev](#linux-regras-udev-obrigatório-para-usb)). |
+| **Logs no SD** | Volume em `/mnt/external_sd/logs` no `docker-compose`; crie o dir e permissões antes de subir. |
+| **Auto-restart** | `restart: always` + `AUTO_START_CAPTURE=1` para continuar após timeout/re-enumeração USB. |
+| **Python (ARM)** | Dependências (numpy, joulescope, etc.) possuem wheels ou build no ARM; primeira build pode demorar um pouco. |
+
+**Checklist na Radxa antes de `docker compose up`:**
+1. Instalar regras udev no host: `sudo ./scripts/install-udev-rules.sh 99` (ou `72` se for usuário no console).
+2. Se usar `99`: `sudo usermod -a -G plugdev $USER` e novo login.
+3. Criar diretório de logs: `sudo mkdir -p /mnt/external_sd/logs && sudo chown -R $USER:$USER /mnt/external_sd/logs`.
+4. Conectar o Joulescope e subir: `docker compose up -d --build`. Acessar em **http://&lt;ip-da-radxa&gt;:8081**.
 
 ## Configuração
 
