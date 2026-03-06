@@ -112,45 +112,62 @@ def _capture_worker(
             _read_supports_timeout = "timeout" in _read_sig.parameters
 
             while not stop_event.is_set():
-                if _read_supports_timeout:
-                    chunk = device.read(duration=CHUNK_SEC, timeout=2.0)
-                else:
-                    chunk = device.read(duration=CHUNK_SEC)
+                try:
+                    if _read_supports_timeout:
+                        chunk = device.read(duration=CHUNK_SEC, timeout=2.0)
+                    else:
+                        chunk = device.read(duration=CHUNK_SEC)
+                except (TypeError, Exception) as read_err:
+                    # Driver pode lançar TypeError (ex.: buffer interno None após falha USB)
+                    result_queue.put({
+                        "type": "error",
+                        "msg": f"Erro na leitura do driver: {read_err}. Possível falha USB; processo será reiniciado.",
+                        "tb": "",
+                    })
+                    break
 
                 if chunk is None or len(chunk) == 0:
                     result_queue.put({"type": "read_empty", "window_sec": CHUNK_SEC})
                     time.sleep(0.01)
                     continue
 
-                accumulated.append(chunk)
+                try:
+                    accumulated.append(chunk)
 
-                if time.time() - t_win_start >= window_duration:
-                    t_end = time.time()
-                    data = _np.concatenate(accumulated, axis=0)
-                    actual_dur = t_end - t_win_start
-                    n = len(data)
-                    expected = int(sr * actual_dur)
-                    tol = max(10000, int(sr * 0.05))
-                    gap = n < (expected - tol)
+                    if time.time() - t_win_start >= window_duration:
+                        t_end = time.time()
+                        data = _np.concatenate(accumulated, axis=0)
+                        actual_dur = t_end - t_win_start
+                        n = len(data)
+                        expected = int(sr * actual_dur)
+                        tol = max(10000, int(sr * 0.05))
+                        gap = n < (expected - tol)
 
-                    stats = _stats(data)
-                    ej, emwh = _energy(data, sr)
+                        stats = _stats(data)
+                        ej, emwh = _energy(data, sr)
 
+                        result_queue.put({
+                            "type": "window",
+                            "t_start": t_win_start,
+                            "t_end": t_end,
+                            "actual_duration": actual_dur,
+                            "stats": stats,
+                            "energy_joules": ej,
+                            "energy_mwh": emwh,
+                            "sampling_rate": sr,
+                            "gap": gap,
+                            "samples": n,
+                        })
+
+                        accumulated = []
+                        t_win_start = time.time()
+                except (TypeError, ValueError, Exception) as proc_err:
                     result_queue.put({
-                        "type": "window",
-                        "t_start": t_win_start,
-                        "t_end": t_end,
-                        "actual_duration": actual_dur,
-                        "stats": stats,
-                        "energy_joules": ej,
-                        "energy_mwh": emwh,
-                        "sampling_rate": sr,
-                        "gap": gap,
-                        "samples": n,
+                        "type": "error",
+                        "msg": f"Erro ao processar amostras: {proc_err}. Reiniciando processo.",
+                        "tb": "",
                     })
-
-                    accumulated = []
-                    t_win_start = time.time()
+                    break
 
             try:
                 device.stop()

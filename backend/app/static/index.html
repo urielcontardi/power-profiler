@@ -171,11 +171,11 @@ table.data-table td input:focus{outline:none;border-color:var(--accent)}
       </label>
       <span id="selectedCount" style="font-size:12px;color:var(--accent)"></span>
     </div>
-    <div style="max-height:180px;overflow-y:auto;border:1px solid var(--border);border-radius:6px">
+    <div style="max-height:380px;overflow-y:auto;border:1px solid var(--border);border-radius:6px">
       <table class="data-table" style="margin:0">
-        <thead><tr><th style="width:32px"></th><th>Arquivo</th><th>Tamanho</th></tr></thead>
+        <thead><tr><th style="width:32px"></th><th>Arquivo</th><th>Tamanho</th><th style="width:60px"></th></tr></thead>
         <tbody id="experimentsBody">
-          <tr><td colspan="3" style="color:var(--text-dim)">Nenhum arquivo CSV</td></tr>
+          <tr><td colspan="4" style="color:var(--text-dim)">Nenhum arquivo CSV</td></tr>
         </tbody>
       </table>
     </div>
@@ -531,7 +531,7 @@ async function refreshExperiments() {
 function renderExperimentsTable() {
   const tbody = document.getElementById('experimentsBody');
   if (!experimentsData.length) {
-    tbody.innerHTML = '<tr><td colspan="3" style="color:var(--text-dim)">Nenhum arquivo CSV</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="4" style="color:var(--text-dim)">Nenhum arquivo CSV</td></tr>';
     document.getElementById('chkSelectAll').checked = false;
     updateSelectionUI();
     return;
@@ -545,6 +545,7 @@ function renderExperimentsTable() {
       +'<td onclick="event.stopPropagation()" style="padding:6px 10px"><input type="checkbox" onchange="toggleFileSelect(\''+esc+'\',this.checked)"'+chk+'></td>'
       +'<td style="font-size:12px;font-family:monospace">'+esc+'</td>'
       +'<td style="color:var(--text-dim);font-size:12px">'+sz+'</td>'
+      +'<td onclick="event.stopPropagation()" style="padding:4px 6px;text-align:center"><a href="/api/download/'+encodeURIComponent(f.name)+'" title="Baixar" style="color:var(--accent);font-size:14px;text-decoration:none">&#8681;</a></td>'
       +'</tr>';
   });
   tbody.innerHTML = rows.join('');

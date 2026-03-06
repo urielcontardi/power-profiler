@@ -12,6 +12,9 @@ import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
+
+TZ_SAO_PAULO = ZoneInfo("America/Sao_Paulo")
 
 import requests
 
@@ -183,12 +186,12 @@ class ProfilerManager:
             return {"error": "No steps in sequence"}
 
         self._stop_event.clear()
-        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        ts = datetime.now(TZ_SAO_PAULO).strftime("%Y%m%d_%H%M%S")
         events_file = str(self.log_dir / f"events_{ts}.csv")
 
         with self._lock:
             self._running = True
-            self._start_time = datetime.now().isoformat()
+            self._start_time = datetime.now(TZ_SAO_PAULO).isoformat()
             self._current_step = "Starting..."
             self._current_config = ""
             self._sensor_status = {sid: "Waiting..." for sid in settings["sensor_ids"]}
@@ -226,7 +229,7 @@ class ProfilerManager:
     # Internal helpers
     # ------------------------------------------------------------------
     def _log(self, msg: str) -> None:
-        ts = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
+        ts = datetime.now(TZ_SAO_PAULO).strftime("%Y-%m-%dT%H:%M:%S")
         line = f"[{ts}] {msg}"
         print(line, flush=True)
         with self._lock:
@@ -248,7 +251,7 @@ class ProfilerManager:
 
     def _write_event(self, writer, f, event: str, config_file: str = "",
                      purpose: str = "", sensor_id: str = "", details: str = "") -> None:
-        ts = datetime.now().isoformat(timespec="seconds")
+        ts = datetime.now(TZ_SAO_PAULO).isoformat(timespec="seconds")
         writer.writerow([ts, event, config_file, purpose, sensor_id, details])
         f.flush()
         os.fsync(f.fileno())
