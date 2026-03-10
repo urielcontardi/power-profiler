@@ -140,8 +140,8 @@ table.data-table td input:focus{outline:none;border-color:var(--accent)}
     </div>
     <div class="form-row">
       <div class="form-group">
-        <label>Taxa de amostragem (Hz, opcional)</label>
-        <input type="number" id="samplingRate" class="form-input" placeholder="Auto" min="1">
+        <label>Taxa de amostragem (Hz, padrão: 50000)</label>
+        <input type="number" id="samplingRate" class="form-input" placeholder="50000" min="1" title="Taxas recomendadas: 1000, 10000, 50000, 100000. Valores altos (>100k) aumentam drops USB (NaN).">
       </div>
       <div class="form-group">
         <label>Máx. janelas (0 = ilimitado)</label>

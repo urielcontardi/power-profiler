@@ -22,8 +22,6 @@ from pathlib import Path
 from typing import Callable, Optional
 from zoneinfo import ZoneInfo
 
-import numpy as np
-
 logger = logging.getLogger(__name__)
 
 TZ_SAO_PAULO = ZoneInfo("America/Sao_Paulo")
@@ -56,25 +54,28 @@ def _capture_worker(
             cur = data[:, 0]
             vol = data[:, 1]
             pwr = cur * vol
-            return {
-                "samples": len(data),
-                "current_mean": float(_np.mean(cur, dtype=_np.float64)),
-                "current_std": float(_np.std(cur, dtype=_np.float64)),
-                "current_min": float(_np.min(cur)),
-                "current_max": float(_np.max(cur)),
-                "voltage_mean": float(_np.mean(vol, dtype=_np.float64)),
-                "voltage_std": float(_np.std(vol, dtype=_np.float64)),
-                "voltage_min": float(_np.min(vol)),
-                "voltage_max": float(_np.max(vol)),
-                "power_mean": float(_np.mean(pwr, dtype=_np.float64)),
-                "power_std": float(_np.std(pwr, dtype=_np.float64)),
-                "power_min": float(_np.min(pwr)),
-                "power_max": float(_np.max(pwr)),
-            }
+            nan_count = int(_np.sum(_np.isnan(cur)))
+            with _np.errstate(all="ignore"):
+                return {
+                    "samples": len(data),
+                    "nan_samples": nan_count,
+                    "current_mean": float(_np.nanmean(cur.astype(_np.float64))),
+                    "current_std": float(_np.nanstd(cur.astype(_np.float64))),
+                    "current_min": float(_np.nanmin(cur)),
+                    "current_max": float(_np.nanmax(cur)),
+                    "voltage_mean": float(_np.nanmean(vol.astype(_np.float64))),
+                    "voltage_std": float(_np.nanstd(vol.astype(_np.float64))),
+                    "voltage_min": float(_np.nanmin(vol)),
+                    "voltage_max": float(_np.nanmax(vol)),
+                    "power_mean": float(_np.nanmean(pwr.astype(_np.float64))),
+                    "power_std": float(_np.nanstd(pwr.astype(_np.float64))),
+                    "power_min": float(_np.nanmin(pwr)),
+                    "power_max": float(_np.nanmax(pwr)),
+                }
 
         def _energy(data: "_np.ndarray", sr: float) -> tuple:
             pwr = data[:, 0] * data[:, 1]
-            ej = float(_np.sum(pwr) / sr)
+            ej = float(_np.nansum(pwr.astype(_np.float64)) / sr)
             return ej, ej * (1000.0 / 3600.0)
 
         # --- Scan ---
@@ -86,8 +87,21 @@ def _capture_worker(
         device = joulescope.scan_require_one(config="auto")
         result_queue.put({"type": "connected", "device": str(device)})
 
+        DEFAULT_SAMPLING_RATE = 50_000  # 50 kHz
+
         with device:
-            sr = initial_sampling_rate or 1_000_000.0
+            target_sr = int(initial_sampling_rate) if initial_sampling_rate else DEFAULT_SAMPLING_RATE
+
+            try:
+                device.parameter_set("sampling_frequency", target_sr)
+            except Exception:
+                pass
+
+            # Ler a taxa real configurada pelo device (pode arredondar para valor suportado)
+            try:
+                sr = float(device.parameter_get("sampling_frequency", "actual"))
+            except Exception:
+                sr = float(target_sr)
 
             try:
                 device.parameter_set("buffer_duration", max(4.0, window_duration * 2 + 1))
@@ -97,9 +111,6 @@ def _capture_worker(
             device.start()
             time.sleep(0.5)
 
-            # Evitar probe de leitura aqui: em alguns cenários do JS220 essa leitura
-            # curta também pode bloquear. Mantemos a taxa informada (ou fallback padrão)
-            # e seguimos diretamente para o loop de captura.
             result_queue.put({"type": "sampling_rate", "rate": sr})
 
             # Loop de captura: acumula chunks de 0.1 s e emite janela por wall-clock.
@@ -145,6 +156,8 @@ def _capture_worker(
 
                         stats = _stats(data)
                         ej, emwh = _energy(data, sr)
+                        nan_count = stats.get("nan_samples", 0)
+                        has_nan_gap = nan_count > 0
 
                         result_queue.put({
                             "type": "window",
@@ -155,7 +168,8 @@ def _capture_worker(
                             "energy_joules": ej,
                             "energy_mwh": emwh,
                             "sampling_rate": sr,
-                            "gap": gap,
+                            "gap": gap or has_nan_gap,
+                            "nan_samples": nan_count,
                             "samples": n,
                         })
 
@@ -443,8 +457,12 @@ class JoulescopeManager:
                     if msg["gap"]:
                         sr_for_log = msg.get("sampling_rate", eff_sr)
                         expected = int(sr_for_log * msg["actual_duration"])
-                        self._push_event("warning",
-                            f"Data gap janela {window_num} (esperado ~{expected}, obtido {msg['samples']})")
+                        nan_count = msg.get("nan_samples", 0)
+                        nan_pct = (nan_count / msg["samples"] * 100) if msg["samples"] > 0 else 0
+                        gap_detail = f"esperado ~{expected}, obtido {msg['samples']}"
+                        if nan_count > 0:
+                            gap_detail += f", {nan_count} NaN ({nan_pct:.1f}% amostras perdidas)"
+                        self._push_event("warning", f"Data gap janela {window_num} ({gap_detail})")
 
                     window_data = {
                         'window_num': window_num,
